@@ -31,6 +31,11 @@ public:
         normalize();
     }
 
+    long long numerator() const { return num; }
+    long long denominator() const { return den; }
+
+    bool isZero() const { return num == 0; }
+
     Rational operator+(const Rational& r) const {
         return Rational(num * r.den + r.num * den, den * r.den);
     }
@@ -196,6 +201,122 @@ Matrix strassenMultiply(const Matrix& A, const Matrix& B) {
     return C;
 }
 
+bool absGreater(const Rational& a, const Rational& b) {
+    long long an = a.numerator();
+    long long bn = b.numerator();
+
+    if (an < 0) an = -an;
+    if (bn < 0) bn = -bn;
+
+    long long lhs = an * b.denominator();
+    long long rhs = bn * a.denominator();
+
+    return lhs > rhs;
+}
+
+bool luDecompose(Matrix& A, int* piv) {
+    if (A.rowCount() != A.colCount())
+        throw runtime_error("LU decomposition requires a square matrix.");
+
+    for (size_t i = 0; i < A.rowCount(); i++)
+        piv[i] = (int)i;
+
+    // finding the row with the greatest absolute element in the i column
+    for (size_t i = 0; i < A.rowCount(); i++) {
+        Rational maxVal(0);
+        size_t iMax = i;
+        for (size_t j = i; j < A.rowCount(); j++) {
+            if (absGreater(A[j][i], maxVal)) {
+                maxVal = A[j][i];
+                iMax = j;
+            }
+        }
+
+        // if the leading element is zero the matrix is degenerate
+        if (maxVal.isZero())
+            return false;
+
+        // switching rows
+        if (iMax != i) {
+            // switching every element
+            for (size_t k = 0; k < A.rowCount(); k++) {
+                Rational temp = A[i][k];
+                A[i][k] = A[iMax][k];
+                A[iMax][k] = temp;
+            }
+
+            int t = piv[i];
+            piv[i] = piv[iMax];
+            piv[iMax] = t;
+        }
+
+        // calculating L and U elements
+        for (size_t j = i + 1; j < A.rowCount(); j++) {
+            A[j][i] = A[j][i] / A[i][i];
+            Rational fact = A[j][i];
+            for (size_t k = i + 1; k < A.rowCount(); k++) {
+                A[j][k] = A[j][k] - fact * A[i][k];
+            }
+        }
+    }
+    return true;
+}
+
+void luSolve(const Matrix& LU, int* piv, Rational* right_part, Rational* result) {
+    if (LU.rowCount() != LU.colCount())
+        throw runtime_error("LU decomposition requires a square matrix.");
+
+    Rational* y = new Rational[LU.rowCount()];
+
+    for (size_t i = 0; i < LU.rowCount(); i++) {
+        Rational sum = right_part[piv[i]];
+        for (size_t j = 0; j < i; j++)
+            sum = sum - LU[i][j] * y[j];
+        y[i] = sum;
+    }
+
+    for (int i = (int)LU.rowCount() - 1; i >= 0; i--) {
+        Rational sum = y[i];
+        for (size_t j = i + 1; j < LU.rowCount(); j++)
+            sum = sum - LU[i][j] * result[j];
+        result[i] = sum / LU[i][i];
+    }
+
+    delete[] y;
+}
+
+bool invertMatrixLU(const Matrix& src, Matrix& inv) {
+    if (src.rowCount() != src.colCount())
+        throw runtime_error("LU decomposition requires a square matrix.");
+
+    Matrix A(src);
+    int* piv = new int[A.rowCount()];
+
+    if (!luDecompose(A, piv)) {
+        delete[] piv;
+        return false; // degenerate matrix
+    }
+
+    Rational* e = new Rational[A.rowCount()];
+    Rational* x = new Rational[A.rowCount()]; // a result from luSolve
+
+    for (size_t col = 0; col < A.rowCount(); col++) {
+        // e is the unit vector
+        for (size_t i = 0; i < A.rowCount(); i++)
+            e[i] = Rational(0);
+        e[col] = Rational(1);
+
+        luSolve(A, piv, e, x);
+
+        for (size_t row = 0; row < A.rowCount(); row++)
+            inv[row][col] = x[row];
+    }
+    delete[] e;
+    delete[] x;
+    delete[] piv;
+    return true;
+}
+
 // Main function
 int main() {
     cout << "Strassen Algorithm for Rational Matrices (T**)\n\n";
@@ -233,9 +354,17 @@ int main() {
         cout << "\nStrassen multiplication skipped (requires square matrices of power of 2 size).\n";
     }
 
+    Matrix Ainv(rowsA, rowsA);
+    if (invertMatrixLU(A, Ainv)) {
+        cout << "\nInverse of A (by LU):\n";
+        Ainv.print();
+    }
+    else {
+        cout << "\nMatrix A is not invertible (det = 0)\n";
+    }
+
     // Future development:
     // 1. Implement inverse matrix using Gauss-Jordan method
-    // 2. Implement inverse matrix using LU decomposition
     // 3. Implement linear regression using given data and labels
 
     return 0;
